@@ -31,11 +31,12 @@ const client = new ImageAnnotatorClient({ keyFilename: path.join(__dirname, CRED
 
 /**
  * 단일 이미지를 변환하는 함수입니다.
- * @param {string} file - 처리할 이미지 파일 이름
+ * @param {string} relativePath - 입력 디렉토리 기준 상대 경로
  * @param {string} inputPath - 처리할 이미지의 전체 경로
+ * @param {string} outputPath - 저장할 이미지의 전체 경로
  */
-async function transformImage(file, inputPath) {
-  console.log(`\n${file} 처리 중...`);
+async function transformImage(relativePath, inputPath, outputPath) {
+  console.log(`\n${relativePath} 처리 중...`);
 
   try {
     // Vision API를 사용하여 이미지에서 객체를 감지합니다.
@@ -51,8 +52,8 @@ async function transformImage(file, inputPath) {
         return (prev.score > current.score) ? prev : current;
       });
 
-      console.log(`${file}에서 가장 높은 신뢰도(${bestGlasses.score.toFixed(2)})로 안경을 감지했습니다.`);
-      
+      console.log(`${relativePath}에서 가장 높은 신뢰도(${bestGlasses.score.toFixed(2)})로 안경을 감지했습니다.`);
+
       // sharp를 사용하여 이미지를 엽니다.
       const image = sharp(inputPath);
       const metadata = await image.metadata(); // 이미지 메타데이터를 가져옵니다.
@@ -79,9 +80,6 @@ async function transformImage(file, inputPath) {
       let cropLeft = Math.round(left - ((cropWidth - width) / 2));
       let cropTop = Math.round(top - ((cropHeight - height) / 2));
 
-      const outputFilename = `${file}`;
-      const outputPath = path.join(OUTPUT_DIR, outputFilename);
-
       console.log(cropLeft, cropTop, cropWidth, cropHeight);
 
       // 이미지를 확장하여 잘라낼 영역이 이미지 경계 내에 있도록 합니다.
@@ -95,11 +93,11 @@ async function transformImage(file, inputPath) {
           extendWith: 'copy' // 'copy'는 경계를 복사하여 확장합니다.
         })
         .toBuffer();
-        
+
       // 확장된 이미지에서 최종 이미지를 추출하여 저장합니다.
       await sharp(extended_image).extract({
-        left: outputSize + cropLeft - ((outputSize - cropWidth) / 2),
-        top: outputSize + cropTop - ((outputSize - cropHeight) / 2),
+        left: Math.round(outputSize + cropLeft - ((outputSize - cropWidth) / 2)),
+        top: Math.round(outputSize + cropTop - ((outputSize - cropHeight) / 2)),
         width: outputSize,
         height: outputSize
       })
@@ -107,11 +105,25 @@ async function transformImage(file, inputPath) {
 
       console.log(` -> 잘라낸 이미지를 ${outputPath}에 저장했습니다.`);
     } else {
-      console.log(`${file}에서 안경을 감지하지 못했습니다.`);
+      console.log(`${relativePath}에서 안경을 감지하지 못했습니다.`);
     }
   } catch (err) {
-    console.error(`${file} 파일 처리 중 Vision API 오류 발생:`, err.message || err);
+    console.error(`${relativePath} 파일 처리 중 Vision API 오류 발생:`, err.message || err);
   }
+}
+
+/**
+ * 디렉토리 내의 모든 파일을 재귀적으로 찾는 헬퍼 함수입니다.
+ * @param {string} dir - 탐색을 시작할 디렉토리 경로
+ * @returns {Promise<string[]>} 파일 경로의 배열
+ */
+async function getFilesRecursive(dir) {
+    const dirents = await fs.readdir(dir, { withFileTypes: true });
+    const files = await Promise.all(dirents.map((dirent) => {
+        const res = path.resolve(dir, dirent.name);
+        return dirent.isDirectory() ? getFilesRecursive(res) : res;
+    }));
+    return Array.prototype.concat(...files);
 }
 
 /**
@@ -123,9 +135,12 @@ async function loadImages() {
   try {
     // 출력 디렉토리가 없으면 생성합니다.
     await fs.mkdir(OUTPUT_DIR, { recursive: true });
-    const files = await fs.readdir(INPUT_DIR);
+
+    // 재귀적으로 모든 파일을 가져옵니다.
+    const allFiles = await getFilesRecursive(INPUT_DIR);
+
     // 이미지 파일만 필터링합니다. (jpg, jpeg, png)
-    const imageFiles = files.filter(f => /\.(jpg|jpeg|png)$/i.test(f));
+    const imageFiles = allFiles.filter(f => /\.(jpg|jpeg|png)$/i.test(f));
 
     if (imageFiles.length === 0) {
       console.log('입력 디렉토리에서 이미지를 찾을 수 없습니다.');
@@ -135,9 +150,14 @@ async function loadImages() {
     console.log(`${imageFiles.length}개의 이미지를 처리합니다.`);
 
     // 각 이미지 파일에 대해 변환 함수를 호출합니다.
-    for (const file of imageFiles) {
-      const inputPath = path.join(INPUT_DIR, file);
-      await transformImage(file, inputPath);
+    for (const fullPath of imageFiles) {
+      const relativePath = path.relative(INPUT_DIR, fullPath);
+      const outputPath = path.join(OUTPUT_DIR, relativePath);
+
+      // 출력 파일의 디렉토리가 존재하지 않으면 생성합니다.
+      await fs.mkdir(path.dirname(outputPath), { recursive: true });
+
+      await transformImage(relativePath, fullPath, outputPath);
     }
   } catch (error) {
     console.error('오류가 발생했습니다:', error.message || error);
