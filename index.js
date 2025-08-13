@@ -17,6 +17,7 @@ const OUTPUT_DIR = path.join(__dirname, 'outputs'); // 처리된 이미지를 �
 const CREDENTIALS_FILE = 'key.json'; // Google Cloud 인증 정보 파일 이름
 
 const OBJECT_RATIO = 80; // 객체 비율 설정
+const MIN_SIZE = 400;
 // --- 설정 종료 ---
 
 // 인증 정보 파일이 있는지 확인합니다.
@@ -43,12 +44,9 @@ async function transformImage(relativePath, inputPath, outputPath) {
     const [result] = await client.objectLocalization(inputPath);
     const objects = result.localizedObjectAnnotations;
 
-    // 감지된 객체 중에서 'Glasses' 또는 'Sunglasses'를 필터링합니다.
-    const glassesObjects = objects.filter(obj => obj.name === 'Glasses' || obj.name === 'Sunglasses');
-
-    if (glassesObjects.length > 0) {
+    if (objects.length > 0) {
       // 가장 높은 신뢰도 점수를 가진 안경 객체를 찾습니다.
-      const bestGlasses = glassesObjects.reduce((prev, current) => {
+      const bestGlasses = objects.reduce((prev, current) => {
         return (prev.score > current.score) ? prev : current;
       });
 
@@ -74,7 +72,7 @@ async function transformImage(relativePath, inputPath, outputPath) {
       // 설정된 비율에 따라 잘라낼 영역의 크기를 계산합니다.
       const cropWidth = Math.round(width * 100 / OBJECT_RATIO);
       const cropHeight = Math.round(height * 100 / OBJECT_RATIO);
-      const outputSize = Math.max(cropWidth, cropHeight); // 최종 정사각형 크기
+      const outputSize = Math.max(Math.max(cropWidth, cropHeight),MIN_SIZE); // 최종 정사각형 크기
 
       // 잘라낼 영역의 왼쪽 상단 좌표를 계산합니다.
       let cropLeft = Math.round(left - ((cropWidth - width) / 2));
